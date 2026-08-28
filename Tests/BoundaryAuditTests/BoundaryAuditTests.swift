@@ -183,6 +183,20 @@ final class OwnershipMathTests: XCTestCase {
         XCTAssertEqual(report.findings(ofKind: .dependencyInjection).count, 3)
     }
 
+    // This number gets quoted in prose, so it gets a test like every other one.
+    // An earlier draft claimed four; the code has always produced five.
+    func testFiveOfTenCoreDeclarationsAreClean() {
+        let auditor = BoundaryAuditor()
+        let flagged = Set(report.findings.map(\.declaration))
+        let clean = SampleInventory.core.filter { !flagged.contains($0.name) }
+        XCTAssertEqual(clean.count, 5)
+        XCTAssertTrue(clean.allSatisfy { declaration in
+            auditor.audit(
+                ModuleInventory(moduleName: "one", declarations: [declaration])
+            ).isClean
+        })
+    }
+
     func testStaffedOwnershipDistribution() {
         let load = report.ticketLoad(under: .staffedCoreTeam)
         XCTAssertEqual(load.total, 11)

@@ -21,8 +21,10 @@ public enum Layer: String, Sendable, Hashable, CaseIterable {
 /// How a declaration is isolated.
 public enum Isolation: Sendable, Hashable {
     case nonisolated
-    /// `@MainActor`. On iOS that means the UI thread. There is no portable
-    /// meaning for it in a module that also has to run under a JVM main looper.
+    /// `@MainActor`. On iOS that means the UI thread. It compiles anywhere, but
+    /// on Android the main thread belongs to the JVM's Looper, which Swift's
+    /// main executor does not drive — so the annotation keeps its meaning and
+    /// loses its usefulness.
     case mainActor
     /// Some other global actor, by name.
     case globalActor(String)

@@ -6,15 +6,26 @@ Swift 6.3 shipped the first official Swift SDK for Android, and there is deliber
 
 `BoundaryAudit` takes a description of a module's declarations and reports the four ways that boundary reliably breaks. Then it does the part a linter never does: it routes each finding to a team, twice — once assuming the shared core has a named owner, and once assuming it does not.
 
-![The same 11 findings, routed twice. With a named core owner: 4 findings to the iOS team, 6 to the shared-core owner, 1 to the Android consumer — a 36% iOS share. With no named owner: 10 to the iOS team, 0 to the core, 1 to Android — a 91% iOS share. Six findings move teams.](article-assets/ownership-collapse.png)
+On the sample module that ships with this repo, that produces two very different numbers from **the same eleven findings**:
 
-Nothing about the code changes between those two columns. Only the org chart does.
+| Shared core is… | iOS team | Shared-core owner | Android consumer | iOS share |
+|---|---|---|---|---|
+| owned by a named team | 4 | 6 | 1 | **36%** |
+| owned by nobody | 10 | 0 | 1 | **91%** |
+
+Nothing about the code changes between those two rows. Only the org chart does.
 
 ---
 
 ## The four rules
 
-![Four boundary rules over one module: platform type in a core signature, isolation only one platform has, isolation the consumer inherits, untyped throw across the boundary, and collaborator constructed rather than injected.](article-assets/four-breaks.png)
+| # | Rule | Example from the sample | Routes to |
+|---|---|---|---|
+| 1 | Platform type in a core signature | `PromoBannerCopy.render(for:)` names `Color`, `Image` | iOS team |
+| 2 | Isolation only one platform has | `@MainActor CheckoutSession.begin(with:)` | iOS team |
+| 2b | Isolation the consumer inherits | `@PaymentActor PaymentCoordinator.authorize(_:)` | Android consumer |
+| 3 | Untyped throw across the boundary | `OrderRepository.save(_:) throws` → `any Error` | Shared-core owner |
+| 4 | Collaborator constructed, not injected | `AnalyticsRecorder` builds `Logger` + `URLSession` itself | Shared-core owner |
 
 Every rule is scoped to `.core`. A `@MainActor` view model is not a portability defect — it is a view model, and a tool that flags it is a tool nobody runs twice.
 
@@ -47,11 +58,13 @@ There is no such thing as unowned work — only work whose owner has not been na
 
 ---
 
-## The test that made the tool honest
+## Two things that went wrong building this
 
-The first run of this auditor over its own sample module reported `SKU` as a StoreKit type, because `SK` followed by an uppercase letter is indistinguishable from `SKProduct` by shape alone. Any prefix heuristic shipped without an escape hatch will do this to somebody's glossary, so `PlatformCatalog` grew a `knownPortableNames` carve-out that is checked *before* both the exact table and the prefix table.
+**The auditor flagged its own sample.** The first run reported `SKU` as a StoreKit type, because `SK` followed by an uppercase letter is indistinguishable from `SKProduct` by shape alone. Any prefix heuristic shipped without an escape hatch will do this to somebody's glossary, so `PlatformCatalog` grew a `knownPortableNames` carve-out checked *before* both the exact table and the prefix table.
 
-`Date`, `Locale`, `URL` and `UUID` are deliberately absent from the platform catalog — they are swift-corelibs-foundation types that genuinely compile off-Apple, and flagging them would be a false positive.
+**The sample module broke the type checker.** `SampleInventory` started life as one twelve-element array literal. It compiled locally and then failed a clean build with *"the compiler is unable to type-check this expression in reasonable time."* Every element has six parameters, five of them defaulted, so the solver's work scales with the literal. Splitting it into two explicitly-typed `[Declaration]` arrays took the clean build from a hard failure to 1.7 seconds.
+
+`Date`, `Data`, `URL` and `UUID` are deliberately absent from the platform catalog — they are swift-corelibs-foundation types that genuinely compile off-Apple, and flagging them would be a false positive.
 
 ---
 
@@ -65,7 +78,7 @@ open Demo.xcodeproj
 
 Pick any iOS Simulator, then Build & Run. No other setup — `Demo.xcodeproj` consumes the library through a local Swift package reference to the repo root, so there is no second repo to fetch and no package to resolve over the network.
 
-The demo screen shows all eleven findings and a segmented control that switches the ownership model. Flipping it redistributes the same findings across teams, which is the entire point.
+The demo screen is written to render all eleven findings with a segmented control that switches the ownership model, so flipping it redistributes the same findings across teams. Be aware of the caveat below before you trust that sentence: `BoundaryAuditUI` is `#if canImport(SwiftUI)`-guarded, and the machine that produced this repo has no SwiftUI — so not one line of that screen has ever been compiled, let alone run. You will see it before I do.
 
 To run the library on its own:
 
@@ -82,14 +95,14 @@ Honest accounting of what was and was not verified:
 
 | Check | Status |
 |---|---|
-| `swift build` | Clean — Swift 6.0.3, `aarch64-unknown-linux-gnu` |
-| `swift test` | **24/24 passing** |
+| `swift build` | Clean — Swift 6.0.3, `aarch64-unknown-linux-gnu`. Verified from a **fresh clone of this repo**, not just locally |
+| `swift test` | **25/25 passing** |
 | `BoundaryAudit` compiles with zero platform imports | Yes — this is the article's own claim, so the library has to survive it |
 | `Demo.xcodeproj` structural validation | Brace/paren balance checked; all 24 object IDs defined and referenced; scheme `BlueprintIdentifier` matches the target |
 | **Launched on an iOS Simulator** | **No.** The build that produced this repo ran in a headless Linux sandbox with no `xcodebuild` or `simctl`, and desktop control could not be authorised during an unattended scheduled run. There is no Simulator screenshot in this repo because no Simulator run happened. |
 | `BoundaryAuditUI` compiled against real SwiftUI | **No** — it is `#if canImport(SwiftUI)`-guarded and compiles to an empty module on Linux |
 
-The two images above are generated diagrams, not screenshots of the app. The numbers in them are asserted against the Swift test suite's own expectations before the figures are drawn, so a stale figure cannot survive a code change.
+Every number in this README comes from the test suite, which asserts all of them (`OwnershipMathTests`). The article linked below carries the diagrams.
 
 ---
 
@@ -98,11 +111,11 @@ The two images above are generated diagrams, not screenshots of the app. The num
 ```
 Sources/BoundaryAudit/       Inventory, PortabilityLens, Ownership, BoundaryAuditor, SampleInventory
 Sources/BoundaryAuditUI/     SwiftUI demo screen (guarded)
-Tests/BoundaryAuditTests/    24 tests
+Tests/BoundaryAuditTests/    25 tests
 Demo.xcodeproj/              Runnable app, local package reference to "."
 Demo/DemoApp.swift           @main entry point
 ```
 
-Article: (added after publish)
+Article: **[Swift on Android Isn't a Port. It's a Re-Org — and I Put a Number on It.](https://medium.com/@er.rajatlakhina/swift-on-android-isnt-a-port-it-s-a-re-org-and-i-put-a-number-on-it-15a97c0d61bd)**
 
 MIT licensed.
