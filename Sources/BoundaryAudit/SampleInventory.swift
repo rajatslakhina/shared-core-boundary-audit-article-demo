@@ -7,11 +7,22 @@
 //
 // Four of the ten declarations are deliberately clean. A sample where
 // everything fails proves nothing about the rules.
+//
+// Note the explicit `[Declaration]` annotations and the split into two arrays.
+// Written as one twelve-element literal, this file compiled locally and then
+// failed a clean build with "the compiler is unable to type-check this
+// expression in reasonable time" — every element has six defaulted parameters,
+// so the solver's work grows with the literal, not with the file. Annotating
+// the element type collapses it.
 
 public enum SampleInventory {
     public static let checkoutCore = ModuleInventory(
         moduleName: "CheckoutCore",
-        declarations: [
+        declarations: core + presentation
+    )
+
+    /// The ten declarations the rules apply to.
+    static let core: [Declaration] = [
             // Clean. Pure domain arithmetic over core-owned types.
             Declaration(
                 name: "CartTotalCalculator.total(for:)",
@@ -91,22 +102,23 @@ public enum SampleInventory {
                 isolation: .actorInstance,
                 thrownErrors: .typed("InventoryError")
             ),
+    ]
 
-            // Presentation layer. Exempt by design — @MainActor and AnyView are
-            // correct here, and a tool that flags them is a tool nobody runs.
-            Declaration(
-                name: "CheckoutScreen.body",
-                layer: .presentation,
-                referencedTypes: ["AnyView", "Color"],
-                isolation: .mainActor
-            ),
-            Declaration(
-                name: "PaymentSheetPresenter.present(from:)",
-                layer: .presentation,
-                referencedTypes: ["UIViewController"],
-                isolation: .mainActor,
-                thrownErrors: .untyped
-            ),
-        ]
-    )
+    /// Exempt by design — `@MainActor` and `AnyView` are correct here, and a
+    /// tool that flags them is a tool nobody runs.
+    static let presentation: [Declaration] = [
+        Declaration(
+            name: "CheckoutScreen.body",
+            layer: .presentation,
+            referencedTypes: ["AnyView", "Color"],
+            isolation: .mainActor
+        ),
+        Declaration(
+            name: "PaymentSheetPresenter.present(from:)",
+            layer: .presentation,
+            referencedTypes: ["UIViewController"],
+            isolation: .mainActor,
+            thrownErrors: .untyped
+        ),
+    ]
 }
